@@ -6,8 +6,7 @@ use std::future::Future;
 
 use serde_json::{Value, json};
 use warpllm::{
-    ChatCompletionRequestMessage, Client, ClientConfig, CreateChatCompletionRequest,
-    ProviderConfig,
+    ChatCompletionRequestMessage, Client, ClientConfig, CreateChatCompletionRequest, ProviderConfig,
 };
 use wiremock::MockServer;
 
