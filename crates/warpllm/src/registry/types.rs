@@ -91,7 +91,7 @@ pub(crate) enum Credential {
     /// `env_api_key:` line has nothing to name, since the credential comes
     /// from Application Default Credentials, not a secret sitting in the
     /// environment.
-    Oauth,
+    OAuth,
     /// Neither field. The provider cannot be authenticated, and a request
     /// routed to it says so rather than naming a variable nothing reads.
     Unavailable,
@@ -131,7 +131,7 @@ impl ProviderSpec {
     pub fn env_api_key(&self) -> Option<&'static str> {
         match self.credential {
             Credential::EnvVar(var) => Some(var),
-            Credential::NotRequired | Credential::Oauth | Credential::Unavailable => None,
+            Credential::NotRequired | Credential::OAuth | Credential::Unavailable => None,
         }
     }
 
@@ -163,7 +163,7 @@ impl ProviderSpec {
     /// than a `MissingApiKey`.
     #[allow(dead_code)]
     pub(crate) fn oauth(&self) -> bool {
-        self.credential == Credential::Oauth
+        self.credential == Credential::OAuth
     }
 }
 
