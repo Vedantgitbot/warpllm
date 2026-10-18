@@ -66,6 +66,22 @@ pub struct ProviderSpec {
     pub(crate) name: &'static str,
     pub(crate) base_url: String,
     pub(crate) credential: Credential,
+    /// `None` for every provider whose models are sent in the plain protocol
+    /// shape; see [`Envelope`].
+    pub(crate) envelope: Option<Envelope>,
+}
+
+/// A provider-level wrapper around the protocol its models speak.
+///
+/// Not a protocol: Claude on Vertex is still `anthropic_messages`, so it is
+/// not an [`Api`](crate::Api) either. What differs is the HOST's request shape
+/// (URL, body, version header), which is transport, and transport is the
+/// provider's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Envelope {
+    /// Claude on Google Cloud: the model rides in the URL, `anthropic_version`
+    /// rides in the body, and the verb is `rawPredict` / `streamRawPredict`.
+    Vertex,
 }
 
 /// How a provider authenticates, with all four states named.
@@ -164,6 +180,13 @@ impl ProviderSpec {
     #[allow(dead_code)]
     pub(crate) fn oauth(&self) -> bool {
         self.credential == Credential::OAuth
+    }
+
+    /// Whether this provider's models are sent in Vertex's envelope: the
+    /// roster's `envelope: vertex`.
+    #[allow(dead_code)] // staged: read by `client.rs` once the route lands
+    pub(crate) fn vertex(&self) -> bool {
+        self.envelope == Some(Envelope::Vertex)
     }
 }
 

@@ -1183,6 +1183,7 @@ mod tests {
     /// roster now, so nothing here has to be leaked to satisfy a lifetime.
     fn demo_provider(base_url: &str, credential: Credential) -> ProviderSpec {
         ProviderSpec {
+            envelope: None,
             name: "demo",
             base_url: base_url.into(),
             credential,

@@ -16,7 +16,9 @@ use std::collections::{BTreeMap, HashMap};
 use serde::Deserialize;
 
 use super::intern::intern;
-use super::types::{Capabilities, Credential, ModelSpec, ProviderSpec, Registry, SupportedApi};
+use super::types::{
+    Capabilities, Credential, Envelope, ModelSpec, ProviderSpec, Registry, SupportedApi,
+};
 
 /// The whole roster: providers, each holding the models routable under it.
 ///
@@ -54,6 +56,11 @@ struct ProviderEntry {
     /// rather than one with a fallback. A forgotten `env_api_key:` line must
     /// not quietly become an unauthenticated request.
     auth: Option<Auth>,
+    /// Which request envelope this provider's models are wrapped in, when it is
+    /// not the plain one. Optional: omitting it keeps the meaning omission has
+    /// always had. A provider-level field because the envelope is a fact about
+    /// the HOST (Vertex's URL and body shape), not about any one model.
+    envelope: Option<EnvelopeField>,
     /// `Option`, and defaulted, so that both ways of writing "no models yet" —
     /// omitting the key and leaving it empty — reach the lint, which says what
     /// is wrong with that in its own words. Neither is a load failure, because
@@ -80,6 +87,15 @@ enum Auth {
     /// `auth: oauth` the roster schema actually uses.
     #[serde(rename = "oauth")]
     OAuth,
+}
+
+/// The `envelope:` vocabulary. An enum for the same reason `Auth` is: Bedrock
+/// (#24) will want a word of its own, and `envelope: vertex` should read the
+/// same before and after it lands.
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum EnvelopeField {
+    Vertex,
 }
 
 /// One model as written: which surfaces it serves, what it ships upstream if
@@ -172,11 +188,29 @@ fn build_provider(registry: &mut Registry, name: &str, entry: ProviderEntry) -> 
         base_url,
         env_api_key,
         auth,
+        envelope,
         models,
     } = entry;
     let credential = credential(name, env_api_key, auth)?;
     for (key, model) in models.unwrap_or_default() {
         let spec = build(&key, name, model).map_err(|e| format!("`{key}`: {e}"))?;
+        // Claude on Vertex is reached over the Anthropic protocol only; a
+        // model listing any other surface under it would be admitted to a
+        // request the host cannot serve, and fail as a 404 upstream.
+        if envelope.is_some() {
+            for supported in spec.supported_apis() {
+                if !matches!(
+                    supported.api(),
+                    crate::Api::AnthropicMessages | crate::Api::AnthropicMessagesStream
+                ) {
+                    return Err(format!(
+                        "`{key}`: `envelope: vertex` serves Claude over the Anthropic \
+                         protocol only, but this model lists {:?}",
+                        supported.api()
+                    ));
+                }
+            }
+        }
         registry.models.insert(key, spec);
     }
     registry.providers.insert(
@@ -185,6 +219,9 @@ fn build_provider(registry: &mut Registry, name: &str, entry: ProviderEntry) -> 
             name: intern(name),
             base_url,
             credential,
+            envelope: envelope.map(|e| match e {
+                EnvelopeField::Vertex => Envelope::Vertex,
+            }),
         },
     );
     Ok(())
@@ -359,6 +396,52 @@ mod tests {
         assert!(provider.unauthenticated());
         // Nothing to read, and nothing to suggest reading.
         assert_eq!(provider.env_api_key(), None);
+    }
+
+    /// `envelope: vertex` is how a roster says this provider's Claude models
+    /// are reached in Vertex's request envelope. Nothing else marks it.
+    #[test]
+    fn envelope_vertex_marks_the_provider() {
+        let registry = load(&format!(
+            "{}{}",
+            PROVIDER.replace("    models:\n", "    envelope: vertex\n    models:\n"),
+            model("demo/plain").replace("openai_compat_chat_completions", "anthropic_messages").replace("openai_compat_chat_completions", "anthropic_messages")
+        ))
+        .unwrap();
+        assert!(registry.providers.values().next().unwrap().vertex());
+    }
+
+    /// Vertex Claude has no chat-completions surface, so a model listing one
+    /// under `envelope: vertex` is a roster nobody can serve.
+    #[test]
+    fn a_vertex_provider_may_not_list_a_non_anthropic_surface() {
+        let err = load(&format!(
+            "{}{}",
+            PROVIDER.replace("    models:\n", "    envelope: vertex\n    models:\n"),
+            model("demo/plain")
+        ))
+        .unwrap_err();
+        assert!(err.contains("Anthropic protocol only"), "{err}");
+    }
+
+    /// Silence keeps its old meaning: no envelope, the plain protocol.
+    #[test]
+    fn a_provider_without_an_envelope_is_not_vertex() {
+        let registry = load(&format!("{}{}", PROVIDER, model("demo/plain"))).unwrap();
+        assert!(!registry.providers.values().next().unwrap().vertex());
+    }
+
+    /// A closed vocabulary, like `auth:`: a typo cannot load, and the message
+    /// names the word that would have worked.
+    #[test]
+    fn an_unknown_envelope_is_rejected() {
+        let err = load(&format!(
+            "{}{}",
+            PROVIDER.replace("    models:\n", "    envelope: nonsense\n    models:\n"),
+            model("demo/plain")
+        ))
+        .unwrap_err();
+        assert!(err.contains("vertex"), "{err}");
     }
 
     /// The one combination that contradicts itself. Both fields are optional

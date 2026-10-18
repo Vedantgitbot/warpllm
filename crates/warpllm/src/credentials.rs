@@ -499,6 +499,7 @@ mod tests {
     #[test]
     fn an_inline_key_authenticates_a_provider_the_roster_gives_no_variable() {
         let spec = ProviderSpec {
+            envelope: None,
             name: "keyless",
             base_url: "https://api.keyless.test/v1".into(),
             // Not `NotRequired`: this is a provider whose key plumbing never
