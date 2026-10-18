@@ -7,9 +7,7 @@ use crate::auth::Authenticator;
 use crate::error::Result;
 use crate::gateway::anthropic::error::error_from_body;
 use crate::gateway::types;
-use crate::protocol::anthropic::messages::transport::{
-    self, EventStream, Outcome, Route, StreamOutcome,
-};
+use crate::protocol::anthropic::messages::transport::{self, EventStream, Outcome, StreamOutcome};
 use crate::protocol::anthropic::messages::types::MessageStreamEvent;
 
 use super::stream::{StreamState, ingest_event};
@@ -37,11 +35,10 @@ pub(crate) async fn exchange(
     provider: &'static str,
     base_url: &str,
     auth: Option<&Authenticator>,
-    route: Route,
     max_output_tokens: Option<u32>,
 ) -> Result<types::ChatResponse> {
     let wire = render_request(request, provider, max_output_tokens)?;
-    match transport::post(http, provider, base_url, auth, route, &wire).await? {
+    match transport::post(http, provider, base_url, auth, &wire).await? {
         Outcome::Ok(response) => Ok(ingest_response(response)),
         Outcome::Status {
             status,
@@ -67,16 +64,12 @@ pub(crate) async fn exchange(
 ///
 /// `read_timeout` travels through rather than being read from a client, which
 /// is what keeps this stateless.
-// The transport context (`base_url`, `auth`, `route`) travels loose, by this
-// module's own design, so adding `route` takes this to eight.
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn exchange_stream(
     request: &types::ChatRequest,
     http: &reqwest::Client,
     provider: &'static str,
     base_url: &str,
     auth: Option<&Authenticator>,
-    route: Route,
     max_output_tokens: Option<u32>,
     read_timeout: Option<Duration>,
 ) -> Result<ChatChunkStream> {
@@ -85,8 +78,7 @@ pub(crate) async fn exchange_stream(
     // gateway form says otherwise fails here rather than being silently
     // corrected. See `transport::send`.
     let wire = render_request(request, provider, max_output_tokens)?;
-    match transport::post_stream(http, provider, base_url, auth, route, &wire, read_timeout).await?
-    {
+    match transport::post_stream(http, provider, base_url, auth, &wire, read_timeout).await? {
         StreamOutcome::Ok(events) => Ok(ChatChunkStream {
             events,
             provider,
@@ -252,7 +244,6 @@ mod tests {
             "anthropic",
             &server.uri(),
             Some(&Authenticator::anthropic_api_key("sk-ant-demo".into())),
-            crate::protocol::anthropic::messages::transport::Route::Anthropic,
             None,
             None,
         )

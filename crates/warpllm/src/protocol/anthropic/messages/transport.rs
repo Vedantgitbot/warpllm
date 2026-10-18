@@ -53,8 +53,11 @@ pub(crate) enum Route {
 }
 
 impl Route {
-    pub(crate) fn new(vertex: bool) -> Self {
-        if vertex {
+    /// The provider's name decides, so nobody passes a route: `vertex` and
+    /// `vertex-*` (one per project or region) are Claude on Google Cloud, and
+    /// everything else is the plain Anthropic shape.
+    pub(crate) fn for_provider(provider: &str) -> Self {
+        if provider == "vertex" || provider.starts_with("vertex-") {
             Route::Vertex
         } else {
             Route::Anthropic
@@ -101,7 +104,6 @@ pub(crate) async fn post(
     provider: &'static str,
     base_url: &str,
     auth: Option<&Authenticator>,
-    route: Route,
     body: &CreateMessageRequest,
 ) -> Result<Outcome> {
     if body.stream == Some(true) {
@@ -109,7 +111,7 @@ pub(crate) async fn post(
             "stream: true asks for events; a whole reply cannot carry them".into(),
         ));
     }
-    let response = send(http, provider, base_url, auth, route, body).await?;
+    let response = send(http, provider, base_url, auth, body).await?;
 
     let parts = read_response(provider, response).await?;
     if !(200..300).contains(&parts.status) {
@@ -171,7 +173,6 @@ pub(crate) async fn post_stream(
     provider: &'static str,
     base_url: &str,
     auth: Option<&Authenticator>,
-    route: Route,
     body: &CreateMessageRequest,
     read_timeout: Option<Duration>,
 ) -> Result<StreamOutcome> {
@@ -180,7 +181,7 @@ pub(crate) async fn post_stream(
             "a streamed request must carry stream: true".into(),
         ));
     }
-    let response = send(http, provider, base_url, auth, route, body).await?;
+    let response = send(http, provider, base_url, auth, body).await?;
 
     if !(200..300).contains(&response.status().as_u16()) {
         let parts = read_response(provider, response).await?;
@@ -242,10 +243,9 @@ async fn send(
     provider: &'static str,
     base_url: &str,
     auth: Option<&Authenticator>,
-    route: Route,
     body: &CreateMessageRequest,
 ) -> Result<reqwest::Response> {
-    let request = match route {
+    let request = match Route::for_provider(provider) {
         Route::Anthropic => http
             .post(format!("{}/messages", base_url.trim_end_matches('/')))
             .header("anthropic-version", API_VERSION)
@@ -487,7 +487,6 @@ mod tests {
             "anthropic",
             &server.uri(),
             Some(&key()),
-            Route::Anthropic,
             &CreateMessageRequest::default(),
         )
         .await
@@ -582,7 +581,6 @@ mod tests {
             "anthropic",
             &format!("{}/", server.uri()),
             Some(&key()),
-            Route::Anthropic,
             &CreateMessageRequest::default(),
         )
         .await;
@@ -629,7 +627,6 @@ mod tests {
             "anthropic",
             &server.uri(),
             Some(&key()),
-            Route::Anthropic,
             &streamed(),
             // Unbounded, which is the default and what every test but the
             // stall one below wants: a mock answers instantly, so a limit
@@ -915,7 +912,6 @@ mod tests {
             "anthropic",
             &format!("http://{addr}"),
             Some(&key()),
-            Route::Anthropic,
             &streamed(),
             Some(LIMIT),
         )
@@ -962,7 +958,6 @@ mod tests {
             "anthropic",
             &server.uri(),
             Some(&key()),
-            Route::Anthropic,
             &CreateMessageRequest {
                 model: "claude-opus-5".to_string(),
                 max_tokens: 7,
@@ -999,7 +994,6 @@ mod tests {
                 "anthropic",
                 &server.uri(),
                 Some(&key()),
-                Route::Anthropic,
                 &CreateMessageRequest {
                     stream,
                     ..Default::default()
@@ -1030,7 +1024,6 @@ mod tests {
             "anthropic",
             &server.uri(),
             Some(&key()),
-            Route::Anthropic,
             &CreateMessageRequest {
                 stream: Some(true),
                 ..Default::default()
@@ -1066,7 +1059,6 @@ mod tests {
             "vertex",
             &server.uri(),
             Some(&Authenticator::bearer("ya29.demo".into())),
-            Route::Vertex,
             &CreateMessageRequest {
                 model: "claude-opus-5".into(),
                 ..Default::default()
@@ -1101,7 +1093,6 @@ mod tests {
             "vertex",
             &server.uri(),
             Some(&Authenticator::bearer("ya29.demo".into())),
-            Route::Vertex,
             &CreateMessageRequest {
                 model: "claude-opus-5".into(),
                 stream: Some(true),

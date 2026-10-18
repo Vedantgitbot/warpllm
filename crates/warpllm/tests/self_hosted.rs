@@ -187,7 +187,6 @@ fn a_vertex_envelope_roster_reaches_raw_predict() {
                vertex-demo:\n    \
                  base_url: \"{}/v1/projects/p/locations/global\"\n    \
                  auth: none\n    \
-                 envelope: vertex\n    \
                  models:\n      \
                    vertex-demo/claude-sonnet-5-5:\n        \
                      supported_apis:\n          \
