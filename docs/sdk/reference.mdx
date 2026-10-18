@@ -247,6 +247,46 @@ A declaration **selects** from the roster; it does not extend it. A provider
 name the roster does not hold fails when the client is built, not at the
 request that happened to route there.
 
+### Claude on Vertex AI
+
+Claude on Google Cloud takes the Anthropic protocol with a different request
+shape, and its address depends on your own project and location. So it is not in
+warpllm's roster. Declare it in a roster file of your own and hand the client its
+path with `specs_path` (Python, Rust), `specsPath` (TypeScript), or the
+`WARPLLM_SPECS` environment variable.
+The file is merged over the built-in roster.
+
+```yaml
+providers:
+  vertex:
+    base_url: "https://us-east5-aiplatform.googleapis.com/v1/projects/YOUR_PROJECT/locations/us-east5"
+    envelope: vertex
+    auth: oauth
+    models:
+      vertex/claude-sonnet-4-5:
+        model: claude-sonnet-4-5@20250929
+        supported_apis:
+          - {api: anthropic_messages}
+          - {api: anthropic_messages_stream}
+```
+
+- **`envelope: vertex`** sends requests in Vertex's shape. The model goes in the
+  URL (`:rawPredict`, or `:streamRawPredict` when streaming), `anthropic_version`
+  goes in the body, and no `anthropic-version` header is sent.
+- **`base_url`** is the whole prefix through the location, because global,
+  multi-region and regional hosts differ. Warpllm appends only the publisher,
+  model and verb.
+- **`auth: oauth`** means no key in the environment. Warpllm mints a bearer token
+  from Application Default Credentials: `gcloud auth application-default login`,
+  a service account via `GOOGLE_APPLICATION_CREDENTIALS`, or workload identity.
+- A Vertex provider may list only Anthropic surfaces. Anything else is refused
+  when the roster loads.
+
+<Note>
+  If the client also declares `providers`, name `vertex` in it, or its models are
+  refused with `provider_not_declared`.
+</Note>
+
 ## Chat completions
 
 <Tabs>

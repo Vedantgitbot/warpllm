@@ -8,6 +8,39 @@ Versions follow [semantic versioning](https://semver.org). While the project is
 pre-1.0, a breaking change bumps the MINOR number: `0.1.x` and `0.2.x` are
 incompatible, and `^0.1` will not upgrade you into one.
 
+## [Unreleased]
+
+### Added
+
+- **Claude on Google Cloud (Vertex AI).** A provider in your own roster can
+  declare `envelope: vertex`, and its Claude models are sent the way Vertex
+  expects them: the model rides in the URL (`:rawPredict`, or
+  `:streamRawPredict` when streaming), `anthropic_version` rides in the body,
+  and no `anthropic-version` header is sent. It is still the Anthropic
+  protocol, so models list `anthropic_messages` and `anthropic_messages_stream`
+  and a chat-completions request is translated as it is for any Claude.
+
+  `base_url` is the whole prefix through the location, since global,
+  multi-region and regional hosts differ, and `auth: oauth` mints the bearer
+  token from Application Default Credentials:
+
+```yaml
+  providers:
+    vertex:
+      base_url: "https://aiplatform.us.rep.googleapis.com/v1/projects/my-project/locations/us"
+      auth: oauth
+      envelope: vertex
+      models:
+        vertex/claude-sonnet-5-5:
+          supported_apis:
+            - {api: anthropic_messages}
+            - {api: anthropic_messages_stream}
+```
+
+  A provider with `envelope: vertex` may list only Anthropic surfaces; a roster
+  that lists another fails when the client is built. Gemini on Vertex is a
+  different protocol and is not part of this.
+
 ## [0.6.1] - 2026-10-13
 
 Nothing in any of the three packages changed. The README now links the hosted

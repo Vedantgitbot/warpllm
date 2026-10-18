@@ -36,10 +36,16 @@
 #   env_api_key   Optional. The environment variable holding the API key. Omit
 #                 it if the provider has no key plumbing yet — a request routed
 #                 there then fails saying exactly that.
-#   auth          Optional, and its only value is `none`. Says this host takes
+#   auth          Optional: `none` or `oauth`. `none` says this host takes
 #                 NO credential, so warpllm sends no `Authorization` header at
 #                 all — what a self-hosted box on a private network usually
 #                 wants.
+#
+#                 `oauth` says the opposite kind of thing: the host needs a
+#                 credential, but it is a token warpllm mints from Application
+#                 Default Credentials rather than a key in the environment.
+#                 It may not appear beside `env_api_key`, for the same reason
+#                 `none` may not.
 #
 #                 A separate field from `env_api_key` rather than a meaning
 #                 given to its absence, and the two may not both appear. Three
@@ -49,6 +55,19 @@
 #                 it (neither field). If silence meant the second, a forgotten
 #                 line on a paid provider would quietly become an
 #                 unauthenticated request instead of a loud local error.
+#   envelope      Optional, and its only value is `vertex`. Says this host is
+#                 Claude on Google Cloud: the same Anthropic protocol, but
+#                 the model rides in the URL (`:rawPredict`, or
+#                 `:streamRawPredict` when streaming), `anthropic_version`
+#                 rides in the body, and no `anthropic-version` header is
+#                 sent. `base_url` is then the whole prefix through the
+#                 location, because global, multi-region and regional hosts
+#                 differ. Every model under it may list only Anthropic
+#                 surfaces.
+#
+#                 Vertex has no universal URL, since every caller has their
+#                 own project, so it belongs in a roster of your own and
+#                 never in this file.
 #   models        The models routable under this provider.
 #
 # Model fields
