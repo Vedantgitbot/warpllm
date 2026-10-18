@@ -405,7 +405,9 @@ mod tests {
         let registry = load(&format!(
             "{}{}",
             PROVIDER.replace("    models:\n", "    envelope: vertex\n    models:\n"),
-            model("demo/plain").replace("openai_compat_chat_completions", "anthropic_messages").replace("openai_compat_chat_completions", "anthropic_messages")
+            model("demo/plain")
+                .replace("openai_compat_chat_completions", "anthropic_messages")
+                .replace("openai_compat_chat_completions", "anthropic_messages")
         ))
         .unwrap();
         assert!(registry.providers.values().next().unwrap().vertex());

@@ -37,6 +37,31 @@ use crate::protocol::anthropic::messages::types::{
 /// [`types`](super::types) does not model.
 const API_VERSION: &str = "2023-06-01";
 
+/// What Vertex wants in the BODY where Anthropic wants a header.
+const VERTEX_API_VERSION: &str = "vertex-2023-10-16";
+
+/// Which request shape a provider's host expects. The protocol is the same
+/// either way; only the URL, the body's `model`/`anthropic_version`, and the
+/// version header differ.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Route {
+    /// `api.anthropic.com`: `{base_url}/messages` and an `anthropic-version` header.
+    Anthropic,
+    /// Claude on Google Cloud: the model rides in the URL, `anthropic_version`
+    /// rides in the body, and the verb is `rawPredict` or `streamRawPredict`.
+    Vertex,
+}
+
+impl Route {
+    pub(crate) fn new(vertex: bool) -> Self {
+        if vertex {
+            Route::Vertex
+        } else {
+            Route::Anthropic
+        }
+    }
+}
+
 /// What the upstream said. A non-2xx is NOT an [`Err`] here: which [`Error`] a
 /// given status and body becomes is the caller's to decide, and deciding here
 /// would mean `protocol` reaching into the conversion layer to find out, which
@@ -76,6 +101,7 @@ pub(crate) async fn post(
     provider: &'static str,
     base_url: &str,
     auth: Option<&Authenticator>,
+    route: Route,
     body: &CreateMessageRequest,
 ) -> Result<Outcome> {
     if body.stream == Some(true) {
@@ -83,7 +109,7 @@ pub(crate) async fn post(
             "stream: true asks for events; a whole reply cannot carry them".into(),
         ));
     }
-    let response = send(http, provider, base_url, auth, body).await?;
+    let response = send(http, provider, base_url, auth, route, body).await?;
 
     let parts = read_response(provider, response).await?;
     if !(200..300).contains(&parts.status) {
@@ -145,6 +171,7 @@ pub(crate) async fn post_stream(
     provider: &'static str,
     base_url: &str,
     auth: Option<&Authenticator>,
+    route: Route,
     body: &CreateMessageRequest,
     read_timeout: Option<Duration>,
 ) -> Result<StreamOutcome> {
@@ -153,7 +180,7 @@ pub(crate) async fn post_stream(
             "a streamed request must carry stream: true".into(),
         ));
     }
-    let response = send(http, provider, base_url, auth, body).await?;
+    let response = send(http, provider, base_url, auth, route, body).await?;
 
     if !(200..300).contains(&response.status().as_u16()) {
         let parts = read_response(provider, response).await?;
@@ -215,18 +242,35 @@ async fn send(
     provider: &'static str,
     base_url: &str,
     auth: Option<&Authenticator>,
+    route: Route,
     body: &CreateMessageRequest,
 ) -> Result<reqwest::Response> {
-    let request = http
-        .post(format!("{}/messages", base_url.trim_end_matches('/')))
-        .header("anthropic-version", API_VERSION)
-        .json(body)
-        // NOT `Error::Network`: nothing was sent, and nothing was going to be.
-        // A URL that will not parse is a warpllm bug or a misconfigured
-        // `base_url`, and calling it a network error would send someone
-        // looking at the provider's status page.
-        .build()
-        .map_err(|e| Error::Internal(format!("could not build the {provider} request: {e}")))?;
+    let request = match route {
+        Route::Anthropic => http
+            .post(format!("{}/messages", base_url.trim_end_matches('/')))
+            .header("anthropic-version", API_VERSION)
+            .json(body),
+        Route::Vertex => {
+            // The verb follows the body's own `stream`, as Anthropic's SDK does.
+            let verb = if body.stream == Some(true) {
+                "streamRawPredict"
+            } else {
+                "rawPredict"
+            };
+            http.post(format!(
+                "{}/publishers/anthropic/models/{}:{verb}",
+                base_url.trim_end_matches('/'),
+                body.model
+            ))
+            .json(&vertex_body(body)?)
+        }
+    }
+    // NOT `Error::Network`: nothing was sent, and nothing was going to be.
+    // A URL that will not parse is a warpllm bug or a misconfigured
+    // `base_url`, and calling it a network error would send someone
+    // looking at the provider's status page.
+    .build()
+    .map_err(|e| Error::Internal(format!("could not build the {provider} request: {e}")))?;
     let request = match auth {
         Some(auth) => auth.authenticate(request).await?,
         None => request,
@@ -234,6 +278,21 @@ async fn send(
     http.execute(request)
         .await
         .map_err(|e| network_error(provider, e))
+}
+
+/// The body Vertex expects: the same Messages request, minus `model` (it is in
+/// the URL) and plus `anthropic_version`. `stream` stays, since the verb and
+/// the body must agree.
+fn vertex_body(body: &CreateMessageRequest) -> Result<serde_json::Value> {
+    let mut value = serde_json::to_value(body)
+        .map_err(|e| Error::Internal(format!("could not render the vertex request body: {e}")))?;
+    if let Some(object) = value.as_object_mut() {
+        object.remove("model");
+        object
+            .entry("anthropic_version")
+            .or_insert_with(|| VERTEX_API_VERSION.into());
+    }
+    Ok(value)
 }
 
 /// The events of one streamed reply, read off the socket as they arrive.
@@ -428,6 +487,7 @@ mod tests {
             "anthropic",
             &server.uri(),
             Some(&key()),
+            Route::Anthropic,
             &CreateMessageRequest::default(),
         )
         .await
@@ -522,6 +582,7 @@ mod tests {
             "anthropic",
             &format!("{}/", server.uri()),
             Some(&key()),
+            Route::Anthropic,
             &CreateMessageRequest::default(),
         )
         .await;
@@ -568,6 +629,7 @@ mod tests {
             "anthropic",
             &server.uri(),
             Some(&key()),
+            Route::Anthropic,
             &streamed(),
             // Unbounded, which is the default and what every test but the
             // stall one below wants: a mock answers instantly, so a limit
@@ -853,6 +915,7 @@ mod tests {
             "anthropic",
             &format!("http://{addr}"),
             Some(&key()),
+            Route::Anthropic,
             &streamed(),
             Some(LIMIT),
         )
@@ -899,6 +962,7 @@ mod tests {
             "anthropic",
             &server.uri(),
             Some(&key()),
+            Route::Anthropic,
             &CreateMessageRequest {
                 model: "claude-opus-5".to_string(),
                 max_tokens: 7,
@@ -935,6 +999,7 @@ mod tests {
                 "anthropic",
                 &server.uri(),
                 Some(&key()),
+                Route::Anthropic,
                 &CreateMessageRequest {
                     stream,
                     ..Default::default()
@@ -965,6 +1030,7 @@ mod tests {
             "anthropic",
             &server.uri(),
             Some(&key()),
+            Route::Anthropic,
             &CreateMessageRequest {
                 stream: Some(true),
                 ..Default::default()
@@ -975,5 +1041,81 @@ mod tests {
             matches!(refused, Err(Error::InvalidInput(_))),
             "{refused:?}"
         );
+    }
+
+    /// Claude on Vertex: the model is in the URL, the version is in the body, and
+    /// neither Anthropic's header nor its `model` field is sent.
+    #[tokio::test]
+    async fn vertex_posts_to_raw_predict_with_the_model_in_the_url() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path(
+                "/publishers/anthropic/models/claude-opus-5:rawPredict",
+            ))
+            .and(header("authorization", "Bearer ya29.demo"))
+            .and(body_partial_json(
+                serde_json::json!({"anthropic_version": "vertex-2023-10-16"}),
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(reply()))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let outcome = post(
+            &reqwest::Client::new(),
+            "vertex",
+            &server.uri(),
+            Some(&Authenticator::bearer("ya29.demo".into())),
+            Route::Vertex,
+            &CreateMessageRequest {
+                model: "claude-opus-5".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert!(matches!(outcome, Outcome::Ok(_)));
+
+        let sent = &server.received_requests().await.unwrap()[0];
+        assert!(sent.headers.get("anthropic-version").is_none());
+        let body: serde_json::Value = serde_json::from_slice(&sent.body).unwrap();
+        assert!(body.get("model").is_none(), "{body}");
+    }
+
+    /// A streamed Vertex request uses the streaming verb, and `stream: true`
+    /// stays in the body so the verb and the body agree.
+    #[tokio::test]
+    async fn vertex_streams_through_stream_raw_predict() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path(
+                "/publishers/anthropic/models/claude-opus-5:streamRawPredict",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_raw("", "text/event-stream"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let outcome = post_stream(
+            &reqwest::Client::new(),
+            "vertex",
+            &server.uri(),
+            Some(&Authenticator::bearer("ya29.demo".into())),
+            Route::Vertex,
+            &CreateMessageRequest {
+                model: "claude-opus-5".into(),
+                stream: Some(true),
+                ..Default::default()
+            },
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(outcome, StreamOutcome::Ok(_)));
+
+        let sent = &server.received_requests().await.unwrap()[0];
+        let body: serde_json::Value = serde_json::from_slice(&sent.body).unwrap();
+        assert_eq!(body["stream"], true, "{body}");
+        assert!(body.get("model").is_none(), "{body}");
     }
 }

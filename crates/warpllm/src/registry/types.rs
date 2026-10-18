@@ -184,7 +184,6 @@ impl ProviderSpec {
 
     /// Whether this provider's models are sent in Vertex's envelope: the
     /// roster's `envelope: vertex`.
-    #[allow(dead_code)] // staged: read by `client.rs` once the route lands
     pub(crate) fn vertex(&self) -> bool {
         self.envelope == Some(Envelope::Vertex)
     }

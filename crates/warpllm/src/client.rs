@@ -395,6 +395,9 @@ impl Client {
                         def.provider.name(),
                         self.base_url(def.provider),
                         def.auth,
+                        crate::protocol::anthropic::messages::transport::Route::new(
+                            def.provider.vertex(),
+                        ),
                         // Anthropic REQUIRES a `max_tokens` and the gateway
                         // form's is optional, so the roster's ceiling is the
                         // fallback. A model documenting none and a caller
@@ -515,6 +518,9 @@ impl Client {
                             def.provider.name(),
                             self.base_url(def.provider),
                             def.auth,
+                            crate::protocol::anthropic::messages::transport::Route::new(
+                                def.provider.vertex(),
+                            ),
                             def.model.capabilities().max_output_tokens(),
                             read_timeout,
                         )
