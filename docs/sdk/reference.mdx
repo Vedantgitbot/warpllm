@@ -259,12 +259,11 @@ The file is merged over the built-in roster.
 ```yaml
 providers:
   vertex:
-    base_url: "https://us-east5-aiplatform.googleapis.com/v1/projects/YOUR_PROJECT/locations/us-east5"
+    base_url: "https://aiplatform.us.rep.googleapis.com/v1/projects/my-project/locations/us"
     envelope: vertex
     auth: oauth
     models:
-      vertex/claude-sonnet-4-5:
-        model: claude-sonnet-4-5@20250929
+      vertex/claude-sonnet-5-5:
         supported_apis:
           - {api: anthropic_messages}
           - {api: anthropic_messages_stream}
