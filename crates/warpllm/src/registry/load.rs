@@ -405,9 +405,7 @@ mod tests {
         let registry = load(&format!(
             "{}{}",
             PROVIDER.replace("    models:\n", "    envelope: vertex\n    models:\n"),
-            model("demo/plain")
-                .replace("openai_compat_chat_completions", "anthropic_messages")
-                .replace("openai_compat_chat_completions", "anthropic_messages")
+            model("demo/plain").replace("openai_compat_chat_completions", "anthropic_messages")
         ))
         .unwrap();
         assert!(registry.providers.values().next().unwrap().vertex());
@@ -444,6 +442,29 @@ mod tests {
         ))
         .unwrap_err();
         assert!(err.contains("vertex"), "{err}");
+    }
+
+    /// A provider that mints its own token: it needs a credential, so it is
+    /// not `auth: none`, but names no variable to read one from.
+    #[test]
+    fn auth_oauth_declares_a_provider_that_mints_its_own_token() {
+        let registry = clean(&format!(
+            "{}{}",
+            without("env_api_key").replace("    models:\n", "    auth: oauth\n    models:\n"),
+            model("demo/plain")
+        ));
+        let provider = registry.providers.get("demo").unwrap();
+        assert!(provider.oauth());
+        assert_eq!(provider.env_api_key(), None);
+        assert!(!provider.unauthenticated());
+        // And the converse: a provider that merely says nothing is not one.
+        assert!(
+            !clean(&with(&model("demo/plain")))
+                .providers
+                .get("demo")
+                .unwrap()
+                .oauth()
+        );
     }
 
     /// The one combination that contradicts itself. Both fields are optional
@@ -605,6 +626,20 @@ mod tests {
         assert_eq!(caps("demo/fast").max_concurrent_requests(), Some(2500));
         assert_eq!(caps("demo/slow").max_concurrent_requests(), Some(500));
         assert_eq!(caps("demo/fast").max_input_tokens(), None);
+    }
+
+    /// The documented input context reaches the spec, and only for the model
+    /// that recorded it.
+    #[test]
+    fn a_documented_input_limit_is_read_for_its_model_only() {
+        let registry = clean(&with(&format!(
+            "      demo/big:\n{CHAT}        capabilities:\n          \
+             max_input_tokens: 128000\n{}",
+            model("demo/plain")
+        )));
+        let caps = |key| registry.models.get(key).unwrap().capabilities();
+        assert_eq!(caps("demo/big").max_input_tokens(), Some(128_000));
+        assert_eq!(caps("demo/plain").max_input_tokens(), None);
     }
 
     // ------------------------------------------------------ supported_apis

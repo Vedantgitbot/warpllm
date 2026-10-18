@@ -343,10 +343,10 @@ impl Error {
             | Error::ModelNotFound(e)
             | Error::InvalidRequest(e)
             | Error::Unknown(e) => Some(e),
-            // Aggregate failover failures are gateway-level; attaching one
-            // attempt's ProviderError — and with it its retry_after — would
-            // tell a caller to retry a chain that is already exhausted.
-            Error::CandidatesExhausted { .. } | Error::DeadlineExceeded { .. } => None,
+            // Including the aggregate failover failures, which are
+            // gateway-level: attaching one attempt's ProviderError — and with
+            // it its retry_after — would tell a caller to retry a chain that
+            // is already exhausted.
             _ => None,
         }
     }
@@ -774,6 +774,14 @@ mod tests {
                 "{error:?}"
             );
         }
+    }
+
+    /// The wire spelling is a contract other surfaces repeat, so each origin
+    /// has exactly one, and it is not the other's.
+    #[test]
+    fn an_origin_spells_itself_for_the_wire() {
+        assert_eq!(Origin::Gateway.as_str(), "gateway");
+        assert_eq!(Origin::Provider.as_str(), "provider");
     }
 
     fn provider_error() -> ProviderError {
