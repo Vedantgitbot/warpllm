@@ -154,6 +154,63 @@ fn a_user_roster_routes_to_a_local_server_with_no_credential() {
     });
 }
 
+/// Claude on Vertex, end to end: a caller's roster declares `envelope: vertex`,
+/// and the request reaches the model-in-the-URL `:rawPredict` path with the
+/// version in the body and neither Anthropic's header nor its `model` field.
+///
+/// `auth: none` because `auth: oauth` would resolve real Application Default
+/// Credentials; the bearer itself is pinned in the transport's own tests.
+#[test]
+fn a_vertex_envelope_roster_reaches_raw_predict() {
+    with_env(&[], async {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path(
+                "/v1/projects/p/locations/global/publishers/anthropic/models/claude-sonnet-5-5:rawPredict",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": "msg_vertex",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-sonnet-5-5",
+                "content": [{"type": "text", "text": "hi"}],
+                "stop_reason": "end_turn",
+                "stop_sequence": null,
+                "usage": {"input_tokens": 1, "output_tokens": 1}
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let roster = format!(
+            "providers:\n  \
+               vertex-demo:\n    \
+                 base_url: \"{}/v1/projects/p/locations/global\"\n    \
+                 auth: none\n    \
+                 models:\n      \
+                   vertex-demo/claude-sonnet-5-5:\n        \
+                     supported_apis:\n          \
+                       - {{api: anthropic_messages}}\n        \
+                     capabilities:\n          \
+                       max_output_tokens: 1024\n",
+            server.uri()
+        );
+        let (_dir, path) = roster_file(&roster);
+
+        let completion = client_with(&path)
+            .chat_completions(request("vertex-demo/claude-sonnet-5-5"))
+            .await
+            .expect("a vertex-envelope roster should complete a request");
+        assert_eq!(completion.model, "vertex-demo/claude-sonnet-5-5");
+
+        let sent = &server.received_requests().await.unwrap()[0];
+        assert!(sent.headers.get("anthropic-version").is_none());
+        let body: serde_json::Value = serde_json::from_slice(&sent.body).unwrap();
+        assert!(body.get("model").is_none(), "{body}");
+        assert_eq!(body["anthropic_version"], "vertex-2023-10-16", "{body}");
+    });
+}
+
 /// Streaming is its own surface, so serving whole replies proves nothing about
 /// it — including the header, which is written by a different call.
 #[test]

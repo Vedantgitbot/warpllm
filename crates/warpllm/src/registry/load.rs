@@ -17,6 +17,7 @@ use serde::Deserialize;
 
 use super::intern::intern;
 use super::types::{Capabilities, Credential, ModelSpec, ProviderSpec, Registry, SupportedApi};
+use crate::protocol::anthropic::messages::transport::Route;
 
 /// The whole roster: providers, each holding the models routable under it.
 ///
@@ -177,6 +178,23 @@ fn build_provider(registry: &mut Registry, name: &str, entry: ProviderEntry) -> 
     let credential = credential(name, env_api_key, auth)?;
     for (key, model) in models.unwrap_or_default() {
         let spec = build(&key, name, model).map_err(|e| format!("`{key}`: {e}"))?;
+        // Claude on Vertex is reached over the Anthropic protocol only; a
+        // model listing any other surface under it would be admitted to a
+        // request the host cannot serve, and fail as a 404 upstream.
+        if Route::for_provider(name) == Route::Vertex {
+            for supported in spec.supported_apis() {
+                if !matches!(
+                    supported.api(),
+                    crate::Api::AnthropicMessages | crate::Api::AnthropicMessagesStream
+                ) {
+                    return Err(format!(
+                        "`{key}`: a `vertex` provider serves Claude over the Anthropic \
+                         protocol only, but this model lists {:?}",
+                        supported.api()
+                    ));
+                }
+            }
+        }
         registry.models.insert(key, spec);
     }
     registry.providers.insert(
@@ -359,6 +377,34 @@ mod tests {
         assert!(provider.unauthenticated());
         // Nothing to read, and nothing to suggest reading.
         assert_eq!(provider.env_api_key(), None);
+    }
+
+    /// Claude on Vertex is reached over the Anthropic protocol only, so a model
+    /// listing another surface under a `vertex` provider is a roster nobody can
+    /// serve.
+    #[test]
+    fn a_vertex_provider_may_not_list_a_non_anthropic_surface() {
+        let err = load(
+            "providers:\n  vertex:\n    base_url: \"https://example.test/v1\"\n    auth: oauth\n    \
+             models:\n      vertex/claude:\n        supported_apis:\n          \
+             - {api: openai_compat_chat_completions}\n",
+        )
+        .unwrap_err();
+        assert!(err.contains("Anthropic protocol only"), "{err}");
+    }
+
+    /// ...and the Anthropic surfaces are what it is for, under `vertex` or any
+    /// `vertex-*` provider.
+    #[test]
+    fn a_vertex_provider_may_list_the_anthropic_surfaces() {
+        for name in ["vertex", "vertex-eu"] {
+            load(&format!(
+                "providers:\n  {name}:\n    base_url: \"https://example.test/v1\"\n    auth: oauth\n    \
+                 models:\n      {name}/claude:\n        supported_apis:\n          \
+                 - {{api: anthropic_messages}}\n"
+            ))
+            .unwrap();
+        }
     }
 
     /// A provider that mints its own token: it needs a credential, so it is
