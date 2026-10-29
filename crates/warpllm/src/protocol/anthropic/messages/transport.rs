@@ -53,30 +53,17 @@ pub(crate) enum Route {
 }
 
 impl Route {
-    /// Which shape this request takes. Two things decide it and neither is
-    /// passed by anyone: the provider's name says the host is Vertex AI, and
-    /// the model's own name says which protocol it speaks there. A `claude-*`
-    /// model under `vertex_ai` is Anthropic's Messages in Vertex's envelope;
-    /// everything else is the plain Anthropic shape.
-    pub(crate) fn for_request(provider: &str, model: &str) -> Self {
-        if is_vertex_ai(provider) && model.starts_with(VERTEX_CLAUDE_PREFIX) {
+    /// Which shape the request takes. The provider's spec decides and no caller
+    /// chooses: a provider with a `vertex:` block is Vertex AI, and the Messages
+    /// requests sent to it take Vertex's shape.
+    pub(crate) fn select(vertex: bool) -> Self {
+        if vertex {
             Route::Vertex
         } else {
             Route::Anthropic
         }
     }
 }
-
-/// Whether a provider's name marks its host as Vertex AI: `vertex_ai`, or
-/// `vertex_ai-<anything>` for a roster that reaches more than one project or
-/// region, since each needs its own `base_url`.
-pub(crate) fn is_vertex_ai(provider: &str) -> bool {
-    provider == "vertex_ai" || provider.starts_with("vertex_ai-")
-}
-
-/// Claude's models are all named `claude-…` on Vertex, which is how one under
-/// `vertex_ai` is told apart from the other families Vertex serves.
-pub(crate) const VERTEX_CLAUDE_PREFIX: &str = "claude-";
 
 /// What the upstream said. A non-2xx is NOT an [`Err`] here: which [`Error`] a
 /// given status and body becomes is the caller's to decide, and deciding here
@@ -116,6 +103,7 @@ pub(crate) async fn post(
     http: &reqwest::Client,
     provider: &'static str,
     base_url: &str,
+    route: Route,
     auth: Option<&Authenticator>,
     body: &CreateMessageRequest,
 ) -> Result<Outcome> {
@@ -124,7 +112,7 @@ pub(crate) async fn post(
             "stream: true asks for events; a whole reply cannot carry them".into(),
         ));
     }
-    let response = send(http, provider, base_url, auth, body).await?;
+    let response = send(http, provider, base_url, route, auth, body).await?;
 
     let parts = read_response(provider, response).await?;
     if !(200..300).contains(&parts.status) {
@@ -185,6 +173,7 @@ pub(crate) async fn post_stream(
     http: &reqwest::Client,
     provider: &'static str,
     base_url: &str,
+    route: Route,
     auth: Option<&Authenticator>,
     body: &CreateMessageRequest,
     read_timeout: Option<Duration>,
@@ -194,7 +183,7 @@ pub(crate) async fn post_stream(
             "a streamed request must carry stream: true".into(),
         ));
     }
-    let response = send(http, provider, base_url, auth, body).await?;
+    let response = send(http, provider, base_url, route, auth, body).await?;
 
     if !(200..300).contains(&response.status().as_u16()) {
         let parts = read_response(provider, response).await?;
@@ -255,10 +244,11 @@ async fn send(
     http: &reqwest::Client,
     provider: &'static str,
     base_url: &str,
+    route: Route,
     auth: Option<&Authenticator>,
     body: &CreateMessageRequest,
 ) -> Result<reqwest::Response> {
-    let request = match Route::for_request(provider, &body.model) {
+    let request = match route {
         Route::Anthropic => http
             .post(format!("{}/messages", base_url.trim_end_matches('/')))
             .header("anthropic-version", API_VERSION)
@@ -499,6 +489,7 @@ mod tests {
             &reqwest::Client::new(),
             "anthropic",
             &server.uri(),
+            Route::Anthropic,
             Some(&key()),
             &CreateMessageRequest::default(),
         )
@@ -593,6 +584,7 @@ mod tests {
             &reqwest::Client::new(),
             "anthropic",
             &format!("{}/", server.uri()),
+            Route::Anthropic,
             Some(&key()),
             &CreateMessageRequest::default(),
         )
@@ -639,6 +631,7 @@ mod tests {
             &reqwest::Client::new(),
             "anthropic",
             &server.uri(),
+            Route::Anthropic,
             Some(&key()),
             &streamed(),
             // Unbounded, which is the default and what every test but the
@@ -924,6 +917,7 @@ mod tests {
             &reqwest::Client::new(),
             "anthropic",
             &format!("http://{addr}"),
+            Route::Anthropic,
             Some(&key()),
             &streamed(),
             Some(LIMIT),
@@ -970,6 +964,7 @@ mod tests {
             &reqwest::Client::new(),
             "anthropic",
             &server.uri(),
+            Route::Anthropic,
             Some(&key()),
             &CreateMessageRequest {
                 model: "claude-opus-5".to_string(),
@@ -1006,6 +1001,7 @@ mod tests {
                 &reqwest::Client::new(),
                 "anthropic",
                 &server.uri(),
+                Route::Anthropic,
                 Some(&key()),
                 &CreateMessageRequest {
                     stream,
@@ -1036,6 +1032,7 @@ mod tests {
             &reqwest::Client::new(),
             "anthropic",
             &server.uri(),
+            Route::Anthropic,
             Some(&key()),
             &CreateMessageRequest {
                 stream: Some(true),
@@ -1071,6 +1068,7 @@ mod tests {
             &reqwest::Client::new(),
             "vertex_ai",
             &server.uri(),
+            Route::Vertex,
             Some(&Authenticator::bearer("ya29.demo".into())),
             &CreateMessageRequest {
                 model: "claude-opus-5".into(),
@@ -1105,6 +1103,7 @@ mod tests {
             &reqwest::Client::new(),
             "vertex_ai",
             &server.uri(),
+            Route::Vertex,
             Some(&Authenticator::bearer("ya29.demo".into())),
             &CreateMessageRequest {
                 model: "claude-opus-5".into(),
@@ -1123,15 +1122,11 @@ mod tests {
         assert!(body.get("model").is_none(), "{body}");
     }
 
-    /// The provider's name says "this is Vertex", and the model's name says which
-    /// protocol: only a `claude-*` model under `vertex_ai` takes Vertex's shape.
+    /// The route is the spec's to choose: a `vertex:` provider is Vertex, and
+    /// anything else is the plain Anthropic shape.
     #[test]
-    fn only_a_claude_model_under_vertex_ai_takes_the_vertex_route() {
-        let vertex = |p, m| Route::for_request(p, m) == Route::Vertex;
-        assert!(vertex("vertex_ai", "claude-sonnet-5-5"));
-        assert!(vertex("vertex_ai-eu", "claude-opus-5"));
-        assert!(!vertex("vertex_ai", "gemini-3-pro"));
-        assert!(!vertex("anthropic", "claude-opus-5"));
-        assert!(!vertex("vertex", "claude-opus-5"));
+    fn the_route_follows_the_provider_spec() {
+        assert_eq!(Route::select(true), Route::Vertex);
+        assert_eq!(Route::select(false), Route::Anthropic);
     }
 }

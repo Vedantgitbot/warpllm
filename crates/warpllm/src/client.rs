@@ -394,6 +394,9 @@ impl Client {
                         &self.http,
                         def.provider.name(),
                         self.base_url(def.provider),
+                        crate::protocol::anthropic::messages::transport::Route::select(
+                            def.provider.vertex,
+                        ),
                         def.auth,
                         // Anthropic REQUIRES a `max_tokens` and the gateway
                         // form's is optional, so the roster's ceiling is the
@@ -514,6 +517,9 @@ impl Client {
                             &self.http,
                             def.provider.name(),
                             self.base_url(def.provider),
+                            crate::protocol::anthropic::messages::transport::Route::select(
+                                def.provider.vertex,
+                            ),
                             def.auth,
                             def.model.capabilities().max_output_tokens(),
                             read_timeout,
@@ -1186,6 +1192,7 @@ mod tests {
             name: "demo",
             base_url: base_url.into(),
             credential,
+            vertex: false,
         }
     }
 

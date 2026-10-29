@@ -259,7 +259,9 @@ The file is merged over the built-in roster.
 ```yaml
 providers:
   vertex_ai:
-    base_url: "https://aiplatform.us.rep.googleapis.com/v1/projects/my-project/locations/us"
+    vertex:
+      project_id: my-project
+      region: us
     auth: oauth
     models:
       vertex_ai/claude-sonnet-5-5:
@@ -268,24 +270,25 @@ providers:
           - {api: anthropic_messages_stream}
 ```
 
-- **The provider name** `vertex_ai` is what marks the host as Vertex, and a
-  `claude-*` model name says it speaks Anthropic's Messages there. Nothing else
-  is declared. Requests go out in Vertex's shape: the model goes in the URL
-  (`:rawPredict`, or `:streamRawPredict` when streaming), `anthropic_version`
-  goes in the body, and no `anthropic-version` header is sent. Name providers
-  `vertex_ai-<anything>` to reach more than one project or region.
-- **`base_url`** is the whole prefix through the location, because global,
-  multi-region and regional hosts differ. Warpllm appends only the publisher,
-  model and verb.
+- **`vertex:`** marks the provider as Vertex AI, and the provider's name is
+  yours to choose. `project_id` and `region` are both required, and warpllm
+  derives the address from them: `global`, a multi-region (`us`, `eu`) and a
+  regional location (`us-east5`) each get their own host. Messages requests go
+  out in Vertex's shape: the model goes in the URL (`:rawPredict`, or
+  `:streamRawPredict` when streaming), `anthropic_version` goes in the body, and
+  no `anthropic-version` header is sent.
+- **`base_url`** is not written. Set `vertex:` or `base_url`, never both: a
+  roster that sets both is refused when it loads.
 - **`auth: oauth`** means no key in the environment. Warpllm mints a bearer token
   from Application Default Credentials: `gcloud auth application-default login`,
   a service account via `GOOGLE_APPLICATION_CREDENTIALS`, or workload identity.
-- A `claude-*` model under it may list only Anthropic surfaces, and any other
-  model is refused when the roster loads for now. Gemini is not supported yet.
+- Until Gemini on Vertex is supported (#35), a provider with a `vertex:` block
+  may list only Anthropic surfaces. Anything else is refused when the roster
+  loads.
 
 <Note>
-  If the client also declares `providers`, name `vertex_ai` in it, or its models are
-  refused with `provider_not_declared`.
+  If the client also declares `providers`, name the Vertex provider in it, or
+  its models are refused with `provider_not_declared`.
 </Note>
 
 ## Chat completions

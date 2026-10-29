@@ -12,35 +12,33 @@ incompatible, and `^0.1` will not upgrade you into one.
 
 ### Added
 
-- **Claude on Google Cloud (Vertex AI).** A provider named `vertex_ai` in your
-  own roster is reached the way Vertex expects Claude: the model rides in the
-  URL (`:rawPredict`, or `:streamRawPredict` when streaming),
+- **Claude on Google Cloud (Vertex AI).** A provider in your own roster with a
+  `vertex:` block is reached the way Vertex expects Claude: the model rides in
+  the URL (`:rawPredict`, or `:streamRawPredict` when streaming),
   `anthropic_version` rides in the body, and no `anthropic-version` header is
-  sent. Nothing is declared beyond the name: the provider's name says the host
-  is Vertex, and a `claude-*` model name says it speaks Anthropic's Messages
-  there, so models list `anthropic_messages` and `anthropic_messages_stream`
-  and a chat-completions request is translated as it is for any Claude. Name
-  providers `vertex_ai-<anything>` to reach more than one project or region.
-
-  `base_url` is the whole prefix through the location, since global,
-  multi-region and regional hosts differ, and `auth: oauth` mints the bearer
+  sent. The block holds `project_id` and `region`, and warpllm derives the
+  address from them, so a provider takes either a `vertex:` block or a
+  `base_url`, never both. The provider's name is yours to choose. Models list
+  `anthropic_messages` and `anthropic_messages_stream`, and a chat-completions
+  request is translated as it is for any Claude. `auth: oauth` mints the bearer
   token from Application Default Credentials:
 
-```yaml
+  ```yaml
   providers:
     vertex_ai:
-      base_url: "https://aiplatform.us.rep.googleapis.com/v1/projects/my-project/locations/us"
+      vertex:
+        project_id: my-project
+        region: us
       auth: oauth
       models:
         vertex_ai/claude-sonnet-5-5:
           supported_apis:
             - {api: anthropic_messages}
             - {api: anthropic_messages_stream}
-```
+  ```
 
-  Any other model under `vertex_ai` is refused when the client is built, and a
-  Claude model may list only Anthropic surfaces. Gemini on Vertex is a
-  different protocol and is tracked in #35.
+  Until Gemini on Vertex lands (#35), a provider with a `vertex:` block may
+  list only Anthropic surfaces.
 
 ## [0.6.1] - 2026-10-13
 
